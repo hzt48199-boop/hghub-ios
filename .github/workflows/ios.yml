@@ -39,16 +39,25 @@ jobs:
         run: |
           set -uo pipefail
           exec > >(tee /tmp/ci-xcode.log) 2>&1
-          echo "== gen tree =="
-          find src-tauri/gen -maxdepth 3 | head -30
-          echo "== tauri ios build help =="
-          pnpm tauri ios build --help || true
-          echo "== tauri ios build --no-sign =="
-          pnpm tauri ios build --no-sign
-          echo "tauri build exit: $?"
-          echo "== artifacts =="
-          find src-tauri/gen -name "*.app" -o -name "*.ipa" | head
-          APP=$(find src-tauri/gen -type d -name "*.app" | grep -i iphoneos | head -1)
+          echo "== gen/apple =="
+          ls src-tauri/gen/apple
+          cd src-tauri/gen/apple
+          echo "== pod install =="
+          pod install || echo "pod install failed (continuing)"
+          ls
+          WS=$(find . -maxdepth 2 -name "*.xcworkspace" | head -1)
+          PROJ=$(find . -maxdepth 1 -name "*.xcodeproj" | head -1)
+          echo "WS=$WS PROJ=$PROJ"
+          if [ -n "$WS" ]; then TARGET=(-workspace "$WS"); else TARGET=(-project "$PROJ"); fi
+          xcodebuild -list "${TARGET[@]}" || true
+          echo "== xcodebuild build =="
+          xcodebuild "${TARGET[@]}" -scheme "huangguo-client_iOS" -configuration release -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" \
+            build
+          echo "xcodebuild exit: $?"
+          cd "$GITHUB_WORKSPACE"
+          APP=$(find "$RUNNER_TEMP/dd/Build/Products" -type d -name "*.app" | head -1)
           echo "APP=$APP"
           if [ -z "$APP" ]; then echo "NO APP FOUND"; exit 1; fi
           mkdir -p Payload
