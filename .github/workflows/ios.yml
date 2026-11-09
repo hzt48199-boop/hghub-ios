@@ -1,0 +1,50 @@
+name: iOS unsigned IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm build
+      - name: Tauri iOS init
+        run: pnpm tauri ios init
+      - name: Build unsigned .app with xcodebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJ=$(ls src-tauri/gen/apple/*.xcodeproj)
+          echo "project: $PROJ"
+          SCHEME=$(xcodebuild -list -project "$PROJ" -json | python3 -c "import json,sys; ss=json.load(sys.stdin)['project']['schemes']; print(next((s for s in ss if s.endswith('_iOS')), ss[0]))")
+          echo "scheme: $SCHEME"
+          xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration release -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" \
+            build 2>&1 | tail -30
+          APP=$(ls -d "$RUNNER_TEMP"/dd/Build/Products/Release-iphoneos/*.app)
+          echo "app: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry "HGhub-1.2.0-unsigned.ipa" Payload
+          ls -lh HGhub-1.2.0-unsigned.ipa
+      - name: Publish IPA as release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "ios-build-${{ github.run_number }}" HGhub-1.2.0-unsigned.ipa --prerelease --title "iOS unsigned build ${{ github.run_number }}" --notes "Unsigned IPA for SideStore sideload."

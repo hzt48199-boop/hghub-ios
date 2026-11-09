@@ -113,50 +113,11 @@ fn is_newer(latest: &str, current: &str) -> bool {
 /// 对比 GitHub Release 的 tag 与当前版本（未认证 60 次/小时/IP，够用）。
 #[tauri::command]
 pub async fn check_update() -> Result<Value, String> {
+    // iOS 侧载版：禁用更新检查，永不联网查新版。
     let current = env!("CARGO_PKG_VERSION").to_string();
-    let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let resp = crate::net::get(
-        &url,
-        std::time::Duration::from_secs(12),
-        Some("application/vnd.github+json"),
-        None,
-    )
-    .await?;
-
-    let status = resp.status();
-    if status.as_u16() == 404 {
-        // 还没发过 release
-        return Ok(json!({
-            "current": current, "latest": "", "has_update": false,
-            "url": format!("https://github.com/{REPO}/releases"),
-        }));
-    }
-    if !status.is_success() {
-        return Err(format!("GitHub 返回 HTTP {status}"));
-    }
-
-    let v: Value = resp.json().await.map_err(|e| crate::net::err_text(&e))?;
-    let tag = v
-        .get("tag_name")
-        .and_then(|x| x.as_str())
-        .unwrap_or("")
-        .to_string();
-    let html = v
-        .get("html_url")
-        .and_then(|x| x.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("https://github.com/{REPO}/releases"));
-    let notes = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
-
     Ok(json!({
-        "current": current,
-        "latest": tag.trim_start_matches(['v', 'V']).to_string(),
-        "tag": tag,
-        "has_update": !tag.is_empty() && is_newer(&tag, &current),
-        "url": html,
-        "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
-        "published_at": v.get("published_at").and_then(|x| x.as_str()).unwrap_or(""),
-        "notes": notes.chars().take(800).collect::<String>(),
+        "current": current, "latest": "", "has_update": false,
+        "url": "",
     }))
 }
 
