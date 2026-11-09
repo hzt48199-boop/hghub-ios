@@ -12,19 +12,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios
       - name: Install deps
-        run: pnpm install --frozen-lockfile
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee /tmp/ci-install.log
       - name: Build frontend
-        run: pnpm build
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm build 2>&1 | tee /tmp/ci-frontend.log
       - name: Tauri iOS init
-        run: pnpm tauri ios init
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm tauri ios init 2>&1 | tee /tmp/ci-iosinit.log
       - name: Build unsigned .app with xcodebuild
         shell: bash
         run: |
@@ -36,13 +45,20 @@ jobs:
           xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration release -sdk iphoneos \
             -derivedDataPath "$RUNNER_TEMP/dd" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" \
-            build 2>&1 | tail -30
+            build 2>&1 | tee /tmp/ci-xcode.log | tail -30
           APP=$(ls -d "$RUNNER_TEMP"/dd/Build/Products/Release-iphoneos/*.app)
           echo "app: $APP"
           mkdir -p Payload
           cp -R "$APP" Payload/
           zip -qry "HGhub-1.2.0-unsigned.ipa" Payload
           ls -lh HGhub-1.2.0-unsigned.ipa
+      - name: Publish logs on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la /tmp/ci-*.log || true
+          gh release create "ci-log-${{ github.run_number }}" /tmp/ci-*.log --prerelease --title "CI logs build ${{ github.run_number }}" --notes "Failure diagnostics." || true
       - name: Publish IPA as release asset
         env:
           GH_TOKEN: ${{ github.token }}
