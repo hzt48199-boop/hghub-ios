@@ -39,8 +39,26 @@ jobs:
         run: |
           set -uo pipefail
           exec > >(tee /tmp/ci-xcode.log) 2>&1
-          echo "== tauri ios build (signing disabled via runner args) =="
-          pnpm tauri ios build --export-method debugging -- CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" || echo "tauri ios build exited nonzero; hunting for .app"
+          echo "== project.yml BEFORE =="
+          cat src-tauri/gen/apple/project.yml
+          ruby -ryaml -e '
+            y = YAML.load_file("src-tauri/gen/apple/project.yml")
+            patch = {"CODE_SIGNING_ALLOWED"=>"NO", "CODE_SIGNING_REQUIRED"=>"NO", "CODE_SIGN_STYLE"=>"Manual", "DEVELOPMENT_TEAM"=>""}
+            y["settings"] ||= {}
+            y["settings"]["base"] = (y["settings"]["base"] || {}).merge(patch)
+            (y["targets"] || {}).each do |name, t|
+              next unless t.is_a?(Hash)
+              t["settings"] ||= {}
+              t["settings"]["base"] = (t["settings"]["base"] || {}).merge(patch)
+            end
+            File.write("src-tauri/gen/apple/project.yml", y.to_yaml)
+            puts "project.yml patched"
+          '
+          echo "== project.yml AFTER =="
+          cat src-tauri/gen/apple/project.yml
+          (cd src-tauri/gen/apple && xcodegen generate)
+          echo "== tauri ios build =="
+          pnpm tauri ios build --export-method debugging || echo "tauri ios build exited nonzero; hunting for .app"
           echo "== hunt for .app / .ipa =="
           find src-tauri/gen "$HOME/Library/Developer/Xcode/DerivedData" "$RUNNER_TEMP" \( -name "*.app" -o -name "*.ipa" \) 2>/dev/null | head -20
           IPA=$(find src-tauri/gen -name "*.ipa" 2>/dev/null | head -1)
