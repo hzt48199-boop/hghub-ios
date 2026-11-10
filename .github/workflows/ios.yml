@@ -62,16 +62,16 @@ jobs:
           echo "== hunt for .app / .ipa =="
           find src-tauri/gen "$HOME/Library/Developer/Xcode/DerivedData" "$RUNNER_TEMP" \( -name "*.app" -o -name "*.ipa" \) 2>/dev/null | head -20
           IPA=$(find src-tauri/gen -name "*.ipa" 2>/dev/null | head -1)
-          if [ -n "$IPA" ]; then cp "$IPA" HGhub-1.2.0-unsigned.ipa; fi
-          if [ ! -f HGhub-1.2.0-unsigned.ipa ]; then
+          if [ -n "$IPA" ]; then cp "$IPA" HGhub-1.2.1-unsigned.ipa; fi
+          if [ ! -f HGhub-1.2.1-unsigned.ipa ]; then
             APP=$(find src-tauri/gen "$HOME/Library/Developer/Xcode/DerivedData" "$RUNNER_TEMP" -type d -name "*.app" 2>/dev/null | head -1)
             echo "APP=$APP"
             if [ -z "$APP" ]; then echo "NO APP FOUND"; exit 1; fi
             mkdir -p Payload
             cp -R "$APP" Payload/
-            zip -qry "HGhub-1.2.0-unsigned.ipa" Payload
+            zip -qry "HGhub-1.2.1-unsigned.ipa" Payload
           fi
-          ls -lh HGhub-1.2.0-unsigned.ipa
+          ls -lh HGhub-1.2.1-unsigned.ipa
       - name: Publish logs on failure
         if: failure()
         env:
@@ -82,4 +82,4 @@ jobs:
       - name: Publish IPA as release asset
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "ios-build-${{ github.run_number }}" HGhub-1.2.0-unsigned.ipa --prerelease --title "iOS unsigned build ${{ github.run_number }}" --notes "Unsigned IPA for SideStore sideload."
+        run: gh release create "ios-build-${{ github.run_number }}" HGhub-1.2.1-unsigned.ipa --prerelease --title "iOS unsigned build ${{ github.run_number }}" --notes "Unsigned IPA for SideStore sideload."
