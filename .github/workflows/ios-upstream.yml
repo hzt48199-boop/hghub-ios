@@ -1,0 +1,85 @@
+name: iOS upstream build
+on:
+  push:
+    branches: [upstream-0.0.4]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+      - name: Install deps
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee /tmp/ci-install.log
+      - name: Build frontend
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm build 2>&1 | tee /tmp/ci-frontend.log
+      - name: Tauri iOS init
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm tauri ios init 2>&1 | tee /tmp/ci-iosinit.log
+      - name: Build unsigned .app with xcodebuild
+        shell: bash
+        run: |
+          set -uo pipefail
+          exec > >(tee /tmp/ci-xcode.log) 2>&1
+          echo "== project.yml BEFORE =="
+          cat src-tauri/gen/apple/project.yml
+          ruby -ryaml -e '
+            y = YAML.load_file("src-tauri/gen/apple/project.yml")
+            patch = {"CODE_SIGNING_ALLOWED"=>"NO", "CODE_SIGNING_REQUIRED"=>"NO", "CODE_SIGN_STYLE"=>"Manual", "DEVELOPMENT_TEAM"=>""}
+            y["settings"] ||= {}
+            y["settings"]["base"] = (y["settings"]["base"] || {}).merge(patch)
+            (y["targets"] || {}).each do |name, t|
+              next unless t.is_a?(Hash)
+              t["settings"] ||= {}
+              t["settings"]["base"] = (t["settings"]["base"] || {}).merge(patch)
+            end
+            File.write("src-tauri/gen/apple/project.yml", y.to_yaml)
+            puts "project.yml patched"
+          '
+          echo "== project.yml AFTER =="
+          cat src-tauri/gen/apple/project.yml
+          (cd src-tauri/gen/apple && xcodegen generate)
+          echo "== tauri ios build =="
+          pnpm tauri ios build --export-method debugging || echo "tauri ios build exited nonzero; hunting for .app"
+          echo "== hunt for .app / .ipa =="
+          find src-tauri/gen "$HOME/Library/Developer/Xcode/DerivedData" "$RUNNER_TEMP" \( -name "*.app" -o -name "*.ipa" \) 2>/dev/null | head -20
+          IPA=$(find src-tauri/gen -name "*.ipa" 2>/dev/null | head -1)
+          if [ -n "$IPA" ]; then cp "$IPA" HGhub-0.0.4-upstream-unsigned.ipa; fi
+          if [ ! -f HGhub-0.0.4-upstream-unsigned.ipa ]; then
+            APP=$(find src-tauri/gen "$HOME/Library/Developer/Xcode/DerivedData" "$RUNNER_TEMP" -type d -name "*.app" 2>/dev/null | head -1)
+            echo "APP=$APP"
+            if [ -z "$APP" ]; then echo "NO APP FOUND"; exit 1; fi
+            mkdir -p Payload
+            cp -R "$APP" Payload/
+            zip -qry "HGhub-0.0.4-upstream-unsigned.ipa" Payload
+          fi
+          ls -lh HGhub-0.0.4-upstream-unsigned.ipa
+      - name: Publish logs on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la /tmp/ci-*.log || true
+          gh release create "ci-log-upstream-${{ github.run_number }}" /tmp/ci-*.log --prerelease --title "CI logs upstream build ${{ github.run_number }}" --notes "Failure diagnostics." || true
+      - name: Publish IPA as release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "ios-upstream-${{ github.run_number }}" HGhub-0.0.4-upstream-unsigned.ipa --prerelease --title "iOS upstream build ${{ github.run_number }}" --notes "Unsigned IPA for SideStore sideload. Upstream 0.0.4 plugin player with custom icon."
