@@ -67,6 +67,10 @@ jobs:
             APP=$(find src-tauri/gen "$HOME/Library/Developer/Xcode/DerivedData" "$RUNNER_TEMP" -type d -name "*.app" 2>/dev/null | head -1)
             echo "APP=$APP"
             if [ -z "$APP" ]; then echo "NO APP FOUND"; exit 1; fi
+            # 验证 .app 里确实有可执行文件，空包直接失败，不发假成功
+            EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist" 2>/dev/null || echo "")
+            if [ -z "$EXECUTABLE" ] || [ ! -s "$APP/$EXECUTABLE" ]; then echo "APP BINARY MISSING OR EMPTY: $APP/$EXECUTABLE"; exit 1; fi
+            file "$APP/$EXECUTABLE" | grep -q 'Mach-O.*arm64' || { echo "APP BINARY NOT ARM64"; exit 1; }
             mkdir -p Payload
             cp -R "$APP" Payload/
             zip -qry "HGhub-0.0.4-upstream-unsigned.ipa" Payload
